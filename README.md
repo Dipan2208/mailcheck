@@ -107,5 +107,3 @@ Set both to a domain you control for best results, since some servers check them
 | `GET /api/status` | Report whether port 25 is reachable |
 
 ---
-
-Notes on the edits: I added the live link, put the verdicts and results in tables, grouped the feature list, and added a layout tree and API section. The GitHub link is still a placeholder, so replace it with your repo URL. The badges assume Python 3.10+; adjust that to match what you've tested.
