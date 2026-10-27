@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mailcheck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;700&family=Fraunces:wght@600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f4f6f8;--panel:#fff;--ink:#1b2430;--mute:#66707d;--line:#dde2e8;--accent:#2b4a6f;
+--ok:#1f7a4d;--bad:#b3362e;--unk:#8a6d1d;--okbg:#e6f3ec;--badbg:#f8e8e6;--unkbg:#f5efdc}
+@media(prefers-color-scheme:dark){:root{--bg:#14181d;--panel:#1b2128;--ink:#e6e9ed;--mute:#8d97a3;--line:#2c343d;--accent:#8fb2db;
+--ok:#5cc490;--bad:#ee7d73;--unk:#d9b85a;--okbg:#18302a;--badbg:#3a2220;--unkbg:#35301a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 "Public Sans",system-ui,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:48px 24px 64px}
+h1{font:600 30px/1.2 Fraunces,Georgia,serif;margin:0 0 6px}
+.sub{color:var(--mute);margin:0 0 32px;max-width:56ch}
+.grid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:24px;align-items:start}
+@media(max-width:800px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:20px}
+textarea{width:100%;height:320px;resize:vertical;border:1px solid var(--line);border-radius:4px;padding:12px;
+background:var(--bg);color:var(--ink);font:13.5px/1.6 ui-monospace,Menlo,Consolas,monospace}
+textarea:focus,button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:flex;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap}
+button{font:500 14px inherit;font-family:inherit;border-radius:4px;padding:9px 18px;cursor:pointer;border:1px solid var(--accent)}
+.primary{background:var(--accent);color:var(--panel)}
+.primary:disabled{opacity:.5;cursor:wait}
+.ghost{background:none;color:var(--accent)}
+.hint{color:var(--mute);font-size:13px}
+.banner{font-size:13px;border-left:3px solid var(--unk);background:var(--unkbg);padding:8px 12px;margin-bottom:14px;border-radius:0 4px 4px 0}
+.sum{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:none;color:var(--ink);padding:5px 12px;border-radius:99px;font-size:13px}
+.chip[aria-pressed=true]{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+table{width:100%;border-collapse:collapse}
+td{padding:10px 8px;border-top:1px solid var(--line);vertical-align:top}
+td.e{font:13px ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
+td small{display:block;color:var(--mute);font:13px "Public Sans",sans-serif;margin-top:2px}
+.tag{display:inline-block;padding:2px 9px;border-radius:3px;font-size:12.5px;font-weight:500;white-space:nowrap}
+.deliverable{background:var(--okbg);color:var(--ok)}.bounce{background:var(--badbg);color:var(--bad)}.unknown{background:var(--unkbg);color:var(--unk)}
+.empty{color:var(--mute);padding:40px 0;text-align:center}
+</style>
+</head>
+<body>
+<main>
+  <h1>Mailcheck</h1>
+  <p class="sub">Paste email addresses and see which ones will probably arrive, which will probably bounce, and which can't be told. Nothing is ever sent to them.</p>
+  <div class="grid">
+    <section class="card">
+      <textarea id="in" spellcheck="false" placeholder="one address per line, or separated by commas"></textarea>
+      <div class="row">
+        <button class="primary" id="go">Check addresses</button>
+        <button class="ghost" id="demo">Try examples</button>
+        <span class="hint" id="count"></span>
+      </div>
+    </section>
+    <section class="card" id="out"><div class="empty">Results will appear here.</div></section>
+  </div>
+</main>
+<script>
+const $=s=>document.querySelector(s), LABEL={deliverable:"Likely delivered",bounce:"Likely to bounce",unknown:"Unknown"};
+let rows=[], filter="all";
+$("#in").addEventListener("input",()=>{const n=$("#in").value.split(/[\s,;]+/).filter(Boolean).length;$("#count").textContent=n?n+" address"+(n>1?"es":""):""});
+$("#demo").onclick=()=>{$("#in").value="hello@python.org\nnot-an-email\nsomeone@gmial.com\nperson@this-domain-does-not-exist-482.com\nanyone@yahoo.com";$("#in").dispatchEvent(new Event("input"))};
+$("#go").onclick=async()=>{
+  const b=$("#go");b.disabled=true;b.textContent="Checking…";
+  try{
+    const r=await fetch("/api/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({emails:$("#in").value})});
+    const d=await r.json(); if(!r.ok) throw new Error(d.error||"Request failed");
+    rows=d.results; filter="all"; render(d.smtp);
+  }catch(e){$("#out").innerHTML='<div class="empty">'+e.message+'</div>'}
+  b.disabled=false;b.textContent="Check addresses";
+};
+function esc(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function render(smtp){
+  const n=k=>rows.filter(r=>r.status==k).length;
+  const chip=(k,t)=>`<button class="chip" data-f="${k}" aria-pressed="${filter==k}">${t}</button>`;
+  const shown=rows.filter(r=>filter=="all"||r.status==filter);
+  $("#out").innerHTML=
+   (smtp?"":'<div class="banner">This server can\'t open mail connections, so only the address format and domain were checked. Mailboxes show as unknown.</div>')+
+   `<div class="sum">${chip("all","All "+rows.length)}${chip("deliverable","Delivered "+n("deliverable"))}${chip("bounce","Bounce "+n("bounce"))}${chip("unknown","Unknown "+n("unknown"))}</div>`+
+   "<table>"+shown.map(r=>`<tr><td class="e">${esc(r.email)}<small>${esc(r.reason)}${r.note?" · "+esc(r.note):""}</small></td><td style="text-align:right"><span class="tag ${r.status}">${LABEL[r.status]}</span></td></tr>`).join("")+"</table>"+
+   '<div class="row"><button class="ghost" id="csv">Download CSV</button></div>';
+  document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{filter=c.dataset.f;render(smtp)});
+  $("#csv").onclick=()=>{const t="email,status,reason\n"+rows.map(r=>[r.email,r.status,r.reason].map(v=>'"'+v.replace(/"/g,'""')+'"').join(",")).join("\n");
+    const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([t],{type:"text/csv"}));a.download="mailcheck.csv";a.click()};
+}
+</script>
+</body>
+</html>
