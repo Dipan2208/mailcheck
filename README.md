@@ -1,38 +1,62 @@
 # Mailcheck
 
-Paste a list of email addresses and get one of three verdicts for each:
-**likely delivered**, **likely to bounce**, or **unknown**, with the reason shown.
+> Paste a list of email addresses and find out which ones will actually land, before you hit send.
 
-Live: _add link_ · Code: _add link_
+**Live app:** https://mailcheck-rrl6.onrender.com · **Code:** https://github.com/Dipan2208/mailcheck
+
+![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Flask](https://img.shields.io/badge/flask-API-lightgrey) ![Deploy](https://img.shields.io/badge/deploy-Render-46e3b7)
+
+Every address gets one of three verdicts, with the reason shown:
+
+| Verdict | Meaning |
+|---|---|
+| ✅ **Likely delivered** | The mail server accepted the mailbox |
+| ❌ **Likely to bounce** | Bad syntax, no such domain, or the server rejected the mailbox |
+| ❔ **Unknown** | The server won't say (catch-all, greylisting, blocked probes) |
+
+**No message is ever sent.** The SMTP conversation stops before the `DATA` command, so nothing is delivered to any address.
+
+## Features
+
+- Three-state verdicts, each with a plain-language reason
+- Typo hints (`gmial.com` → `gmail.com`)
+- Role-address notes (`info@`, `admin@`)
+- Disposable-domain detection
+- Catch-all detection
+- Duplicate removal
+- Filter by result and export to CSV
+- Up to 100 addresses per run, checked 8 at a time
 
 ## How it works
 
-Each address goes through checks in order, stopping at the first conclusive one:
+Each address passes through these checks in order and stops at the first conclusive one:
 
-1. **Syntax**: format and length limits (RFC 5321). Failure -> bounce.
-2. **DNS**: looks up MX records, falling back to A records. No such domain, or a null MX (RFC 7505) -> bounce.
-3. **Known limits**: disposable providers and providers that accept everything at SMTP time (Yahoo, Outlook, iCloud and similar) -> unknown, because no probe can tell.
+1. **Syntax**: format and length limits (RFC 5321). Failure → bounce.
+2. **DNS**: looks up MX records, falling back to A records. A non-existent domain or a null MX (RFC 7505) → bounce.
+3. **Known limits**: disposable providers, and providers that accept everything at SMTP time (Yahoo, Outlook, iCloud and similar) → unknown, because no probe can tell.
 4. **SMTP probe**: connects to the domain's mail server on port 25 and runs `EHLO`, `MAIL FROM`, `RCPT TO`, then `QUIT`.
-   - `250` -> the server accepts the mailbox. A second probe to a random address detects **catch-all** domains, which accept anything (-> unknown). Otherwise -> delivered.
-   - `550/551/553` -> bounce.
-   - `4xx`, other codes, timeouts -> unknown (greylisting, rate limiting, refusal).
 
-**No message is ever sent.** The conversation ends before the `DATA` command, so nothing is delivered to any address.
-
-Also: typo hints (`gmial.com` -> `gmail.com`), role-address notes (`info@`, `admin@`), duplicate removal, a filter by result, and CSV export. Limit is 100 addresses per run, checked 8 at a time.
+| Server response | Result |
+|---|---|
+| `250` | Mailbox accepted. A second probe to a random address detects **catch-all** domains (→ unknown). Otherwise → delivered |
+| `550` / `551` / `553` | Bounce |
+| `4xx`, other codes, timeouts | Unknown (greylisting, rate limiting, refusal) |
 
 ## Why "unknown" is common
 
-Many servers never confirm mailboxes: they accept all recipients and bounce later, block probes from unfamiliar IPs, or greylist. Guessing would be worse than saying so, so these are reported as unknown with the cause.
+Many servers never confirm mailboxes. They accept all recipients and bounce later, block probes from unfamiliar IPs, or greylist. Guessing would be worse than admitting uncertainty, so these are reported as **unknown** along with the cause.
 
-## What the deployed version can and cannot check
+## Hosted vs. local
 
-Free hosts (Render and similar) block outbound port 25. The app detects this at runtime and shows a banner. On the deployed version:
+Free hosts such as Render block outbound port 25. The app detects this at runtime and shows a banner.
 
-- **Can check:** syntax, domain existence, MX records, null MX, typos, disposable domains.
-- **Cannot check:** whether a specific mailbox exists. Addresses with a working domain are reported as *unknown* with the reason "port 25 blocked".
+| | Hosted ([live demo](https://mailcheck-rrl6.onrender.com)) | Local / VPS |
+|---|---|---|
+| Syntax, domain, MX, null MX | ✅ | ✅ |
+| Typos, disposable domains | ✅ | ✅ |
+| Mailbox-level SMTP check | ❌ (reported as *unknown*, "port 25 blocked") | ✅ |
 
-Run it locally (home networks and many VPS providers allow port 25) or on a VPS to get the full SMTP check.
+For the full SMTP check, run it locally (home networks and many VPS providers allow port 25) or on a VPS.
 
 ## Run locally
 
@@ -40,15 +64,48 @@ Run it locally (home networks and many VPS providers allow port 25) or on a VPS 
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python app.py            # http://127.0.0.1:5000
+```
+
+Run the tests:
+
+```bash
 pip install pytest && pytest
 ```
 
-Optional env vars: `SMTP_HELO` (hostname used in EHLO) and `SMTP_FROM` (envelope sender). Set both to a domain you control for best results, since some servers check them.
+**Optional environment variables**
+
+| Variable | Purpose |
+|---|---|
+| `SMTP_HELO` | Hostname used in `EHLO` |
+| `SMTP_FROM` | Envelope sender |
+
+Set both to a domain you control for best results, since some servers check them.
 
 ## Deploy on Render
 
-Push to GitHub, create a new **Web Service** from the repo; `render.yaml` supplies the settings (build `pip install -r requirements.txt`, start `gunicorn app:app`).
+1. Push the repo to GitHub.
+2. Create a new **Web Service** from the repo.
+3. `render.yaml` supplies the settings (build: `pip install -r requirements.txt`, start: `gunicorn app:app`).
 
-## Layout
+## Project layout
 
-`verifier.py` checks · `app.py` Flask API (`POST /api/check`, `GET /api/status`) · `templates/index.html` UI · `test_verifier.py` tests
+```
+├── app.py               # Flask API: POST /api/check, GET /api/status
+├── verifier.py          # Validation and probe logic
+├── templates/
+│   └── index.html       # UI
+├── test_verifier.py     # Tests
+├── render.yaml          # Render deploy config
+└── requirements.txt
+```
+
+## API
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/check` | Check a list of addresses |
+| `GET /api/status` | Report whether port 25 is reachable |
+
+---
+
+Notes on the edits: I added the live link, put the verdicts and results in tables, grouped the feature list, and added a layout tree and API section. The GitHub link is still a placeholder, so replace it with your repo URL. The badges assume Python 3.10+; adjust that to match what you've tested.
